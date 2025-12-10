@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Student Resource App</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #F9FAFB;
+        }
+        
+        /* Smooth transitions */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Hide scrollbar for clean UI */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Safe area for bottom nav */
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* Loader Animation */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #4F46E5;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- App Container -->
+    <div id="app" class="flex-1 flex flex-col relative h-full overflow-hidden">
+        <!-- Content will be injected here by JavaScript -->
+    </div>
+
+    <!-- Notification Toast Container -->
+    <div id="toast-container" class="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none"></div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const API_BASE_URL = 'https://library-system-backend-rxkz.onrender.com/api';
+        const INSTAGRAM_LINK = 'https://www.instagram.com/shivam_kumar037s';
+
+        // --- STATE MANAGEMENT ---
+        const state = {
+            view: 'auth', // auth, main, details
+            authView: 'login', // login, register
+            activeTab: 'home', // home, search, upload, profile
+            user: null,
+            recentBooks: [],
+            userBooks: [],
+            selectedBook: null,
+            searchQuery: '',
+            loading: false
+        };
+
+        // --- DOM ELEMENTS ---
+        const app = document.getElementById('app');
+        const toastContainer = document.getElementById('toast-container');
+
+        // --- INITIALIZATION ---
+        function init() {
+            // Check Local Storage
+            const savedUser = localStorage.getItem('studentResourceUser');
+            if (savedUser) {
+                state.user = JSON.parse(savedUser);
+                state.view = 'main';
+                fetchRecentBooks();
+            }
+            render();
+        }
+
+        // --- API FUNCTIONS ---
+
+        async function fetchRecentBooks() {
+            setLoading(true);
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/recent`);
+                if (!res.ok) throw new Error('Failed to fetch books');
+                const data = await res.json();
+                state.recentBooks = data;
+                render(); // Re-render to show books
+            } catch (err) {
+                console.error(err);
+                showToast(err.message || 'Error fetching data', 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function fetchUserBooks(email) {
+            if (!email) return;
+            setLoading(true);
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/user/${email}`);
+                if (!res.ok) throw new Error('Failed to fetch your uploads');
+                const data = await res.json();
+                state.userBooks = data;
+                render();
+            } catch (err) {
+                showToast("Failed to load your uploads", "error");
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            const email = event.target.email.value;
+            const password = event.target.password.value;
+
+            setLoading(true);
+            try {
+                const res = await fetch(`${API_BASE_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+
+                if (!res.ok) throw new Error(data.error || 'Login failed');
+
+                // Success
+                localStorage.setItem('studentResourceUser', JSON.stringify(data));
+                state.user = data;
+                state.view = 'main';
+                state.activeTab = 'home';
+                
+                showToast(`Welcome back, ${data.name}!`);
+                fetchRecentBooks();
+                fetchUserBooks(data.email);
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setLoading(false);
+                render();
+            }
+        }
+
+        async function handleRegister(event) {
+            event.preventDefault();
+            const name = event.target.name.value;
+            const email = event.target.email.value;
+            const mobile = event.target.mobile.value;
+            const password = event.target.password.value;
+
+            // Gmail Verification
+            if (!email.toLowerCase().endsWith('@gmail.com')) {
+                showToast("Security Alert: Only @gmail.com addresses are allowed.", "error");
+                return;
+            }
+
+            setLoading(true);
+            try {
+                const res = await fetch(`${API_BASE_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, mobile, password })
+                });
+                const data = await res.json();
+
+                if (!res.ok) throw new Error(data.error || 'Registration failed');
+
+                showToast("Registration Successful! Please Login.");
+                state.authView = 'login';
+                render();
+
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setLoading(false);
+                render(); // Re-render to stop loading spinner
+            }
+        }
+
+        async function handleUpload(event) {
+            event.preventDefault();
+            if (!state.user) {
+                showToast("Please login to upload", "error");
+                state.view = 'auth';
+                render();
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('bookName', event.target.bookName.value);
+            formData.append('description', event.target.description.value);
+            formData.append('uploaderIdentifier', state.user.email);
+            formData.append('file', event.target.file.files[0]);
+
+            setLoading(true);
+            render(); // Show spinner
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+                showToast("File Uploaded Successfully!");
+                state.activeTab = 'profile';
+                fetchUserBooks(state.user.email);
+                fetchRecentBooks();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setLoading(false);
+                render();
+            }
+        }
+
+        async function handleDelete(bookId) {
+            if (!confirm("Are you sure you want to delete this file?")) return;
+
+            setLoading(true);
+            render(); // Show loading state
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/${bookId}?deleterIdentifier=${state.user.email}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error("Delete failed");
+
+                showToast("File Deleted");
+                fetchUserBooks(state.user.email);
+                fetchRecentBooks();
+                
+                if (state.selectedBook && state.selectedBook.id === bookId) {
+                    state.view = 'main';
+                }
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setLoading(false);
+                render();
+            }
+        }
+
+        function handleLogout() {
+            localStorage.removeItem('studentResourceUser');
+            state.user = null;
+            state.userBooks = [];
+            state.view = 'auth';
+            state.authView = 'login';
+            showToast("Logged out successfully");
+            render();
+        }
+
+        // --- UTILITY FUNCTIONS ---
+
+        function setLoading(isLoading) {
+            state.loading = isLoading;
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.createElement('div');
+            const bgColor = type === 'error' ? 'bg-red-500' : 'bg-green-600';
+            toast.className = `${bgColor} text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium fade-in pointer-events-auto transition-opacity duration-300`;
+            toast.innerText = msg;
+
+            toastContainer.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- RENDER FUNCTIONS ---
+
+        function render() {
+            // Initialize Lucide icons after rendering
+            requestAnimationFrame(() => {
+                lucide.createIcons();
+            });
+
+            if (state.view === 'auth') {
+                renderAuth();
+            } else if (state.view === 'details') {
+                renderDetails();
+            } else {
+                renderMain();
+            }
+        }
+
+        // 1. Render Auth Screen
+        function renderAuth() {
+            const isLogin = state.authView === 'login';
+            const buttonText = state.loading ? 'Processing...' : (isLogin ? 'Login' : 'Verify & Register');
+
+            app.innerHTML = `
+                <div class="min-h-screen bg-gray-50 flex flex-col justify-center px-6 fade-in">
+                    <div class="sm:mx-auto sm:w-full sm:max-w-md">
+                        <div class="text-center mb-6">
+                            <div class="bg-indigo-600 text-white w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl">
+                                <i data-lucide="book-open" width="32" height="32"></i>
+                            </div>
+                            <h2 class="text-3xl font-extrabold text-gray-900">Student Resource</h2>
+                            <p class="mt-2 text-gray-600">Access & Share Knowledge</p>
+                        </div>
+
+                        <div class="bg-white py-8 px-6 shadow-xl rounded-2xl">
+                            <form id="authForm" class="space-y-5">
+                                ${!isLogin ? `
+                                    <input name="name" type="text" required placeholder="Full Name" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                                    <input name="mobile" type="tel" required placeholder="Mobile Number" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                                ` : ''}
+                                
+                                <div class="relative">
+                                    <input name="email" type="email" required placeholder="Gmail ID (Example@gmail.com)" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                                    ${!isLogin ? `<p class="text-xs text-orange-500 mt-1 ml-1">*Verification required</p>` : ''}
+                                </div>
+
+                                <input name="password" type="password" required placeholder="Password" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+
+                                <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-indigo-200 flex justify-center items-center">
+                                    ${state.loading ? '<div class="loader mr-2"></div>' : ''}
+                                    ${buttonText}
+                                </button>
+                            </form>
+                            
+                            <div class="mt-6 text-center">
+                                <p class="text-sm text-gray-600">
+                                    ${isLogin ? "Don't have an account? " : "Already verified? "}
+                                    <button id="toggleAuth" class="font-medium text-indigo-600 hover:text-indigo-500 underline">
+                                        ${isLogin ? 'Create Account' : 'Login Here'}
+                                    </button>
+                                </p>
+                            </div>
+                        </div>
+                        <button id="skipBtn" class="mt-8 text-gray-500 text-sm w-full text-center hover:underline">Skip to Browse</button>
+                    </div>
+                </div>
+            `;
+
+            // Attach Listeners
+            document.getElementById('authForm').onsubmit = isLogin ? handleLogin : handleRegister;
+            document.getElementById('toggleAuth').onclick = () => {
+                state.authView = isLogin ? 'register' : 'login';
+                render();
+            };
+            document.getElementById('skipBtn').onclick = () => {
+                state.view = 'main';
+                state.activeTab = 'home';
+                render();
+            };
+        }
+
+        // 2. Render Main Screen (with Tabs)
+        function renderMain() {
+            const header = `
+                <div class="bg-indigo-600 p-4 pb-12 rounded-b-3xl shadow-lg sticky top-0 z-10 transition-all duration-300">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center text-white">
+                            <i data-lucide="book-open" class="mr-2"></i>
+                            <h1 class="text-xl font-bold">Student Resource</h1>
+                        </div>
+                        ${state.user ? `
+                            <div onclick="switchTab('profile')" class="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white border-2 border-indigo-300 cursor-pointer hover:bg-indigo-400 transition">
+                                ${state.user.name.charAt(0).toUpperCase()}
+                            </div>
+                        ` : `
+                            <button onclick="goToAuth()" class="bg-white text-indigo-600 px-4 py-1 rounded-full text-sm font-bold shadow hover:bg-gray-100 transition">Login</button>
+                        `}
+                    </div>
+                    
+                    <!-- Search Bar -->
+                    <div class="bg-white p-3 rounded-xl flex items-center shadow-md">
+                        <i data-lucide="search" class="text-gray-400 mr-2" width="20"></i>
+                        <input 
+                            type="text" 
+                            id="searchInput"
+                            placeholder='Search "Java Notes" or "Amit"...' 
+                            class="w-full outline-none text-gray-700 placeholder-gray-400"
+                            value="${state.searchQuery}"
+                            oninput="handleSearch(this.value)"
+                        />
+                    </div>
+                </div>
+            `;
+
+            let contentHtml = '';
+
+            // --- TAB CONTENT LOGIC ---
+            
+            // HOME TAB
+            if (state.activeTab === 'home') {
+                const booksHtml = state.loading ? `
+                    <div class="col-span-2 text-center py-10 flex flex-col items-center">
+                        <div class="loader"></div>
+                        <p class="mt-4 text-gray-500">Loading resources...</p>
+                    </div>
+                ` : (state.recentBooks.length > 0 ? state.recentBooks.map(book => getBookCardHtml(book)).join('') : `
+                    <div class="col-span-2 text-center py-10 text-gray-400">No recent uploads found.</div>
+                `);
+
+                contentHtml = `
+                    <div class="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl p-6 mb-6 text-white shadow-lg relative overflow-hidden fade-in">
+                        <div class="relative z-10">
+                            <h2 class="text-2xl font-bold mb-1">Share Knowledge</h2>
+                            <p class="text-indigo-100 text-sm mb-3">Upload notes & help others.</p>
+                            <button onclick="${state.user ? "switchTab('upload')" : "goToAuth()"}" class="bg-white text-indigo-600 px-4 py-2 rounded-lg text-sm font-bold shadow-md hover:scale-105 transition-transform">Upload Now</button>
+                        </div>
+                        <i data-lucide="file-text" class="absolute -bottom-4 -right-4 text-white opacity-20" width="100" height="100"></i>
+                    </div>
+
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex justify-between items-center">
+                        <span>Recent Uploads</span>
+                        <span class="text-xs text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">All Files</span>
+                    </h2>
+
+                    <div class="grid grid-cols-2 gap-4 pb-20 fade-in">
+                        ${booksHtml}
+                    </div>
+                `;
+            }
+
+            // SEARCH TAB
+            else if (state.activeTab === 'search') {
+                const filtered = state.recentBooks.filter(book => 
+                    book.bookName.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
+                    (book.uploadedByUserName && book.uploadedByUserName.toLowerCase().includes(state.searchQuery.toLowerCase()))
+                );
+
+                const resultsHtml = filtered.length > 0 ? filtered.map(book => getBookCardHtml(book)).join('') : `
+                    <div class="col-span-2 text-center py-10 text-gray-400 flex flex-col items-center">
+                        <i data-lucide="search-x" width="48" height="48" class="mb-2 opacity-50"></i>
+                        No resources found matching "${state.searchQuery}"
+                    </div>
+                `;
+
+                contentHtml = `
+                    <div class="mt-8 fade-in">
+                        <h2 class="text-lg font-bold text-gray-800 mb-4">Search Results</h2>
+                        <div class="grid grid-cols-2 gap-4 pb-20">
+                            ${resultsHtml}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // UPLOAD TAB
+            else if (state.activeTab === 'upload') {
+                if (!state.user) {
+                    contentHtml = `<div class="text-center mt-10 text-gray-500">Please login to access upload.</div>`;
+                } else {
+                    contentHtml = `
+                        <div class="mt-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 fade-in">
+                            <h2 class="text-xl font-bold text-gray-800 mb-2">Upload Resource</h2>
+                            
+                            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded-r-lg">
+                                <div class="flex">
+                                    <i data-lucide="alert-triangle" class="text-yellow-500 mr-2"></i>
+                                    <div>
+                                        <p class="text-sm text-yellow-700 font-bold">Strict Policy</p>
+                                        <p class="text-xs text-yellow-600">Do NOT upload personal, copyrighted, or illegal documents. Your IP is logged.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <form id="uploadForm" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">File Name</label>
+                                    <input name="bookName" type="text" required class="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-indigo-500 outline-none" placeholder="e.g. Physics Chapter 1">
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                    <textarea name="description" required class="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-indigo-500 outline-none h-24" placeholder="Describe the content..."></textarea>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Select File (PDF/Image)</label>
+                                    <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition cursor-pointer relative bg-gray-50">
+                                        <input name="file" type="file" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                                        <div class="flex flex-col items-center pointer-events-none">
+                                            <i data-lucide="upload-cloud" class="text-indigo-400 mb-2" width="32" height="32"></i>
+                                            <span class="text-sm text-gray-500">Tap to browse file</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-green-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-green-700 transition flex justify-center items-center">
+                                    ${state.loading ? '<div class="loader mr-2"></div>' : ''}
+                                    ${state.loading ? 'Uploading...' : 'Publish Resource'}
+                                </button>
+                            </form>
+                        </div>
+                    `;
+                }
+            }
+
+            // PROFILE TAB
+            else if (state.activeTab === 'profile') {
+                if (!state.user) {
+                    contentHtml = `<div class="text-center mt-10">Loading profile...</div>`;
+                } else {
+                    const uploadsHtml = state.userBooks.length === 0 ? `
+                        <div class="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">You haven't uploaded anything yet.</div>
+                    ` : state.userBooks.map(book => `
+                        <div class="bg-white p-3 rounded-xl flex items-center shadow-sm border border-gray-100 hover:shadow-md transition">
+                            <div class="h-12 w-12 bg-gray-100 rounded-lg flex items-center justify-center mr-3 overflow-hidden flex-shrink-0">
+                                ${book.thumbnailUrl ? `<img src="${book.thumbnailUrl}" class="w-full h-full object-cover"/>` : `<i data-lucide="file-text" width="20" class="text-gray-400"></i>`}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <h4 class="font-bold text-sm text-gray-800 truncate">${book.bookName}</h4>
+                                <p class="text-xs text-gray-400">${new Date(book.uploadDate).toLocaleDateString()}</p>
+                            </div>
+                            <div class="flex space-x-2 flex-shrink-0">
+                                <button onclick="openDetails(${book.id})" class="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-200 transition"><i data-lucide="book-open" width="16"></i></button>
+                                <button onclick="handleDelete(${book.id})" class="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition"><i data-lucide="trash-2" width="16"></i></button>
+                            </div>
+                        </div>
+                    `).join('');
+
+                    contentHtml = `
+                        <div class="mt-8 fade-in pb-20">
+                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 flex items-center">
+                                <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-2xl font-bold mr-4 border-4 border-white shadow">
+                                    ${state.user.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                    <h2 class="text-xl font-bold text-gray-800">${state.user.name}</h2>
+                                    <p class="text-sm text-gray-500">${state.user.email}</p>
+                                    <p class="text-xs text-indigo-600 mt-1 font-semibold bg-indigo-50 inline-block px-2 py-0.5 rounded">${state.userBooks.length} Uploads</p>
+                                </div>
+                            </div>
+
+                            <h3 class="text-lg font-bold text-gray-800 mb-4">My Uploads</h3>
+                            <div class="space-y-3 mb-8">
+                                ${uploadsHtml}
+                            </div>
+
+                            <div class="pt-6 border-t border-gray-200">
+                                <h3 class="text-sm font-bold text-gray-400 uppercase mb-4">Support & Contact</h3>
+                                <a href="${INSTAGRAM_LINK}" target="_blank" rel="noreferrer" class="flex items-center p-4 bg-white rounded-xl shadow-sm mb-3 text-pink-600 border border-pink-100 hover:bg-pink-50 transition">
+                                    <i data-lucide="instagram" class="mr-3"></i>
+                                    <span class="font-bold">Follow us on Instagram</span>
+                                </a>
+                                <button onclick="handleLogout()" class="w-full flex items-center justify-center p-4 bg-gray-200 rounded-xl text-gray-700 font-bold hover:bg-gray-300 transition">
+                                    <i data-lucide="log-out" class="mr-2" width="18"></i> Logout
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            app.innerHTML = `
+                <div class="flex-1 overflow-y-auto no-scrollbar bg-gray-50">
+                    ${header}
+                    <div class="px-4 -mt-6 relative z-0">
+                        ${contentHtml}
+                    </div>
+                </div>
+                ${getBottomNavHtml()}
+            `;
+
+            // Setup listeners for forms in main view
+            const uploadForm = document.getElementById('uploadForm');
+            if (uploadForm) uploadForm.onsubmit = handleUpload;
+            
+            // Focus search input if active
+            const searchInput = document.getElementById('searchInput');
+            if(state.activeTab === 'search' && searchInput) {
+                searchInput.focus();
+                // Move cursor to end
+                const val = searchInput.value;
+                searchInput.value = '';
+                searchInput.value = val;
+            }
+        }
+
+        // 3. Render Details Screen
+        function renderDetails() {
+            const book = state.selectedBook;
+            if (!book) {
+                state.view = 'main';
+                render();
+                return;
+            }
+
+            const isOwner = state.user && book.uploadedByUserName === state.user.email;
+
+            app.innerHTML = `
+                <div class="min-h-screen bg-white pb-20 fade-in flex flex-col">
+                    <div class="sticky top-0 bg-white z-10 p-4 border-b flex items-center justify-between shadow-sm">
+                        <button onclick="goBack()" class="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition">
+                            <i data-lucide="chevron-left"></i>
+                        </button>
+                        <span class="font-bold text-gray-800">Resource Details</span>
+                        <div class="w-10"></div>
+                    </div>
+
+                    <div class="p-6 flex-1 overflow-y-auto">
+                        <div class="w-full h-64 bg-gray-100 rounded-2xl flex items-center justify-center mb-6 overflow-hidden border border-gray-200 shadow-inner">
+                            ${book.thumbnailUrl ? 
+                                `<img src="${book.thumbnailUrl}" class="w-full h-full object-contain" alt="preview">` : 
+                                `<i data-lucide="file-text" width="80" height="80" class="text-indigo-300"></i>`
+                            }
+                        </div>
+
+                        <h1 class="text-2xl font-bold text-gray-900 mb-2 leading-tight">${book.bookName}</h1>
+                        <div class="flex items-center text-gray-500 text-sm mb-6 bg-gray-50 p-2 rounded-lg inline-block">
+                            <i data-lucide="user" width="16" class="mr-2 inline"></i>
+                            <span>Uploaded by <span class="text-indigo-600 font-medium">${book.uploadedByUserName || 'Anonymous'}</span></span>
+                        </div>
+
+                        <div class="bg-indigo-50 p-5 rounded-xl border border-indigo-100 mb-6">
+                            <h3 class="text-sm font-bold text-indigo-400 uppercase mb-2 flex items-center"><i data-lucide="info" width="14" class="mr-1"></i> Description</h3>
+                            <p class="text-gray-700 leading-relaxed text-sm">${book.description}</p>
+                        </div>
+
+                        <button 
+                            onclick="window.open('${book.downloadUrl}', '_blank')"
+                            class="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-200 flex items-center justify-center mb-4 hover:bg-indigo-700 transition transform active:scale-95"
+                        >
+                            <i data-lucide="download" class="mr-2"></i> Download File
+                        </button>
+
+                        ${isOwner ? `
+                            <button 
+                                onclick="handleDelete(${book.id})"
+                                class="w-full bg-white text-red-600 font-bold py-3 rounded-xl border-2 border-red-100 flex items-center justify-center hover:bg-red-50 transition"
+                            >
+                                <i data-lucide="trash-2" class="mr-2" width="18"></i> Delete Resource
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- HTML HELPERS ---
+
+        function getBookCardHtml(book) {
+            return `
+                <div 
+                    onclick="openDetails(${book.id})"
+                    class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-all cursor-pointer flex flex-col transform hover:-translate-y-1"
+                >
+                    <div class="h-32 bg-gray-100 relative flex items-center justify-center overflow-hidden">
+                        ${book.thumbnailUrl ? 
+                            `<img src="${book.thumbnailUrl}" alt="cover" class="w-full h-full object-cover">` : 
+                            `<i data-lucide="file-text" width="40" height="40" class="text-gray-400"></i>`
+                        }
+                        <div class="absolute top-2 right-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow">PDF</div>
+                    </div>
+                    <div class="p-3 flex-1 flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold text-gray-800 text-sm line-clamp-2 leading-snug">${book.bookName}</h3>
+                            <p class="text-xs text-gray-500 mt-1 flex items-center">
+                                <i data-lucide="user" width="10" class="mr-1"></i> ${book.uploadedByUserName ? book.uploadedByUserName.split('@')[0] : 'Unknown'}
+                            </p>
+                        </div>
+                        <button class="mt-3 w-full bg-green-50 text-green-700 text-xs font-bold py-2 rounded border border-green-200 hover:bg-green-100 transition">
+                            View File
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getBottomNavHtml() {
+            const getTabClass = (tab) => state.activeTab === tab ? 'text-indigo-600 scale-110' : 'text-gray-400 hover:text-gray-600';
+            
+            return `
+                <div class="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-2 z-50 shadow-[0_-5px_10px_rgba(0,0,0,0.05)] pb-safe transition-all">
+                    <button onclick="switchTab('home')" class="flex flex-col items-center p-2 transition-transform duration-200 ${getTabClass('home')}">
+                        <i data-lucide="home" width="24"></i>
+                        <span class="text-[10px] mt-1 font-medium">Home</span>
+                    </button>
+                    <button onclick="switchTab('search')" class="flex flex-col items-center p-2 transition-transform duration-200 ${getTabClass('search')}">
+                        <i data-lucide="search" width="24"></i>
+                        <span class="text-[10px] mt-1 font-medium">Search</span>
+                    </button>
+                    <button onclick="${state.user ? "switchTab('upload')" : "goToAuth()"}" class="flex flex-col items-center relative -top-5">
+                        <div class="bg-indigo-600 text-white p-4 rounded-full shadow-xl border-4 border-gray-50 transform transition-transform hover:scale-105 active:scale-95 flex items-center justify-center">
+                            <i data-lucide="upload-cloud" width="24"></i>
+                        </div>
+                        <span class="text-[10px] font-medium text-gray-500 mt-1">Upload</span>
+                    </button>
+                    <button onclick="${state.user ? "switchTab('profile')" : "goToAuth()"}" class="flex flex-col items-center p-2 transition-transform duration-200 ${getTabClass('profile')}">
+                        <i data-lucide="user" width="24"></i>
+                        <span class="text-[10px] mt-1 font-medium">Account</span>
+                    </button>
+                </div>
+            `;
+        }
+
+        // --- NAVIGATION HANDLERS ---
+
+        function switchTab(tab) {
+            state.activeTab = tab;
+            state.view = 'main';
+            if (tab === 'profile') fetchUserBooks(state.user.email);
+            render();
+        }
+
+        function goToAuth() {
+            state.view = 'auth';
+            state.authView = 'login';
+            render();
+        }
+
+        function openDetails(bookId) {
+            // Find book from recent or user books
+            const book = state.recentBooks.find(b => b.id === bookId) || state.userBooks.find(b => b.id === bookId);
+            if (book) {
+                state.selectedBook = book;
+                state.view = 'details';
+                render();
+            }
+        }
+
+        function goBack() {
+            state.view = 'main';
+            state.selectedBook = null;
+            render();
+        }
+
+        function handleSearch(query) {
+            state.searchQuery = query;
+            state.activeTab = 'search';
+            render();
+            // Maintain focus is handled in render
+        }
+
+        // Start the App
+        init();
+
+    </script>
+</body>
+</html>
