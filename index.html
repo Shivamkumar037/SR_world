@@ -39,15 +39,47 @@
         .fade-in { animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* Golden Glow */
-        .gold-border { border: 1px solid #F59E0B; }
-        .gold-shadow { box-shadow: 0 4px 14px 0 rgba(245, 158, 11, 0.15); }
+        /* Input field focus glow */
+        .input-glow {
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .input-glow:focus {
+            border-color: #2563EB;
+            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+        }
     </style>
 </head>
 <body class="text-gray-800 h-screen flex flex-col overflow-hidden bg-[#F0F9FF]">
 
     <div id="app" class="flex-1 flex flex-col relative h-full overflow-hidden"></div>
     <div id="toast-container" class="fixed top-5 left-1/2 transform -translate-x-1/2 z-[70] flex flex-col gap-2 w-full max-w-xs px-4 pointer-events-none"></div>
+
+    <!-- Edit Modal (Hidden by Default) -->
+    <div id="editModal" class="fixed inset-0 bg-black bg-opacity-50 z-[80] hidden items-center justify-center p-4 fade-in">
+        <div class="bg-white w-full max-w-md p-6 rounded-2xl shadow-2xl border border-slate-100">
+            <h3 class="text-xl font-bold text-slate-800 mb-4 border-b pb-2">Edit Resource</h3>
+            <form id="editForm" onsubmit="handleEditSubmit(event)">
+                <input type="hidden" id="editBookId">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Title</label>
+                        <input type="text" id="editBookName" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none input-glow font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Description</label>
+                        <textarea id="editDescription" required rows="3" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none input-glow font-medium resize-none"></textarea>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button type="button" onclick="closeEditModal()" class="px-4 py-2 bg-slate-100 text-slate-600 font-bold rounded-xl active:scale-95 transition">Cancel</button>
+                    <button type="submit" id="saveEditBtn" class="px-6 py-2 bg-green-600 text-white font-bold rounded-xl active:scale-95 transition flex items-center justify-center">
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <script>
         // --- CONFIG ---
@@ -81,6 +113,7 @@
         // --- DOM ---
         const app = document.getElementById('app');
         const toastContainer = document.getElementById('toast-container');
+        const editModal = document.getElementById('editModal');
 
         // --- INIT ---
         function init() {
@@ -89,11 +122,12 @@
                 state.user = JSON.parse(savedUser);
                 state.view = 'main';
                 fetchRecentBooks();
+                if (state.user) fetchUserBooks(state.user.email);
             }
             render();
         }
 
-        // --- API ---
+        // --- API & DATA ---
         async function fetchRecentBooks() {
             setLoading(true);
             try {
@@ -124,12 +158,11 @@
             }
         }
 
-        // --- HANDLERS ---
+        // --- AUTH ---
         async function handleAuth(e, type) {
             e.preventDefault();
             const form = e.target;
             const email = form.email.value;
-            const password = form.password.value;
             
             if (!email.toLowerCase().endsWith('@gmail.com')) {
                 showToast("Only @gmail.com is allowed", "error");
@@ -141,11 +174,12 @@
 
             try {
                 const endpoint = type === 'login' ? '/auth/login' : '/auth/register';
-                const body = { email, password };
-                if (type === 'register') {
-                    body.name = form.name.value;
-                    body.mobile = form.mobile.value;
-                }
+                const body = { 
+                    email: email, 
+                    password: form.password.value,
+                    name: type === 'register' ? form.name.value : undefined,
+                    mobile: type === 'register' ? form.mobile.value : undefined,
+                };
 
                 const res = await fetch(`${API_BASE_URL}${endpoint}`, {
                     method: 'POST',
@@ -162,6 +196,7 @@
                     state.view = 'main';
                     showToast(`Welcome back, ${data.name}!`);
                     fetchRecentBooks();
+                    fetchUserBooks(data.email);
                 } else {
                     showToast("Account created! Please login.");
                     state.authView = 'login';
@@ -174,6 +209,7 @@
             }
         }
 
+        // --- USER ACTIONS ---
         async function handleUpload(e) {
             e.preventDefault();
             if(!state.user) return;
@@ -186,17 +222,91 @@
 
             try {
                 const res = await fetch(`${API_BASE_URL}/books/upload`, { method: 'POST', body: formData });
-                if (!res.ok) throw new Error('Upload failed');
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || 'Upload failed');
+                }
                 
                 showToast("Resource uploaded successfully!");
                 state.activeTab = 'profile';
                 fetchUserBooks(state.user.email);
                 fetchRecentBooks();
+                // Clear form fields
+                e.target.reset();
             } catch (err) {
                 showToast(err.message, 'error');
             } finally {
                 setLoading(false);
                 render();
+            }
+        }
+        
+        function openEditModal(book) {
+            document.getElementById('editBookId').value = book.id;
+            document.getElementById('editBookName').value = book.bookName;
+            document.getElementById('editDescription').value = book.description;
+            editModal.classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            editModal.classList.add('hidden');
+        }
+
+        async function handleEditSubmit(e) {
+            e.preventDefault();
+            const bookId = document.getElementById('editBookId').value;
+            const bookName = document.getElementById('editBookName').value;
+            const description = document.getElementById('editDescription').value;
+            
+            const btn = document.getElementById('saveEditBtn');
+            const originalText = btn.textContent;
+            btn.innerHTML = '<div class="loader-white mr-2"></div> Saving...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/${bookId}?updaterIdentifier=${state.user.email}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bookName, description })
+                });
+
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || 'Edit failed');
+                }
+
+                closeEditModal();
+                showToast("Resource updated!");
+                fetchUserBooks(state.user.email);
+                fetchRecentBooks(); 
+
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function handleDelete(bookId) {
+            if(!confirm("Kya aap sach mein is file ko delete karna chahte hain?")) return;
+            
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/${bookId}?deleterIdentifier=${state.user.email}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || 'Delete failed');
+                }
+
+                showToast("File Deleted");
+                fetchUserBooks(state.user.email);
+                fetchRecentBooks();
+                if(state.selectedBook?.id === bookId) state.view = 'main'; 
+
+            } catch (err) {
+                showToast(err.message, 'error');
             }
         }
 
@@ -209,6 +319,11 @@
                 showToast("Added to Wishlist");
             }
             localStorage.setItem('sr_wishlist', JSON.stringify(state.wishlist));
+            render();
+        }
+
+        function handleSearch(query) {
+            state.searchQuery = query;
             render();
         }
 
@@ -296,16 +411,18 @@
                                 </div>
                             </div>
                             <div onclick="state.activeTab='profile'; render()" class="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200 cursor-pointer border-2 border-white">
+                                <!-- FIX: Syntax Error in Conditional Rendering -->
                                 ${state.user ? state.user.name.charAt(0).toUpperCase() : '<i data-lucide="user" class="w-5 h-5"></i>'}
                             </div>
                         </div>
                         
+                        <!-- Search Bar (Fixed for Responsiveness) -->
                         <div class="relative group">
                             <i data-lucide="search" class="absolute left-4 top-3.5 text-gray-400 w-5 h-5 group-focus-within:text-blue-500 transition-colors"></i>
                             <input 
                                 type="text" 
                                 value="${state.searchQuery}"
-                                oninput="state.searchQuery=this.value; render()"
+                                oninput="handleSearch(this.value)"
                                 placeholder="Search 'Physics' or 'Java'..." 
                                 class="w-full bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-2xl pl-12 pr-4 py-3.5 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50/50 transition-all shadow-inner"
                             >
@@ -446,7 +563,7 @@
                         </div>
                     </div>
 
-                    <form onsubmit="handleUpload(event)" class="space-y-6 pb-24">
+                    <form id="uploadForm" onsubmit="handleUpload(event)" class="space-y-6 pb-24">
                         <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-5">
                             <div>
                                 <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">File Name</label>
@@ -470,9 +587,9 @@
                             </div>
                         </div>
 
-                        <!-- Sticky Submit Button -->
-                        <div class="fixed bottom-24 left-0 w-full px-5 z-20">
-                            <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-green-200 hover:shadow-2xl hover:-translate-y-1 active:scale-95 transition-all flex justify-center items-center text-lg border-2 border-white/20">
+                        <!-- Sticky Submit Button (FIXED) -->
+                        <div class="fixed bottom-0 left-0 w-full px-5 pb-safe z-40 bg-white pt-3 shadow-[0_-5px_15px_rgba(0,0,0,0.08)]">
+                            <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-green-200 hover:shadow-2xl hover:-translate-y-1 active:scale-95 transition-all flex justify-center items-center text-lg border-2 border-white/20 mb-3">
                                 ${state.loading ? '<div class="loader-white"></div>' : 'Publish Resource'}
                             </button>
                         </div>
@@ -504,6 +621,25 @@
 
         function renderProfileContent() {
             if(!state.user) return `<div class="p-10 text-center"><div class="loader-white border-blue-600 border-t-transparent"></div></div>`;
+            
+            const myUploadsHtml = state.userBooks.length === 0 ? 
+                `<div class="text-center py-6 text-slate-400 border border-dashed border-slate-200 rounded-xl bg-white">No files uploaded yet.</div>` :
+                state.userBooks.map(book => `
+                    <div class="flex items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-3 active:scale-[0.98] transition">
+                        <div class="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center mr-3 flex-shrink-0">
+                            <i data-lucide="file-text" class="w-5 h-5 text-blue-500"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h4 class="font-bold text-sm text-slate-800 truncate">${book.bookName}</h4>
+                            <p class="text-[10px] text-slate-400">Uploaded: ${new Date(book.uploadDate).toLocaleDateString()}</p>
+                        </div>
+                        <div class="flex space-x-2 flex-shrink-0">
+                            <button onclick="openEditModal(${JSON.stringify(book).replace(/"/g, '&quot;')})" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition" title="Edit"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                            <button onclick="handleDelete(${book.id})" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition" title="Delete"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                `).join('');
+
             return `
                 <div class="bg-white min-h-screen">
                     <div class="bg-gradient-to-b from-slate-900 to-slate-800 px-5 pt-12 pb-32 rounded-b-[3rem] shadow-xl text-center relative">
@@ -517,7 +653,7 @@
                         <p class="text-slate-400 text-sm font-medium">${state.user.email}</p>
                     </div>
 
-                    <div class="px-5 -mt-20 relative z-10 pb-24">
+                    <div class="px-5 -mt-20 relative z-10 pb-6">
                         <!-- Stats -->
                         <div class="bg-white rounded-3xl shadow-xl shadow-slate-200/50 p-6 flex justify-between items-center mb-6 border border-slate-50">
                             <div class="text-center flex-1 border-r border-slate-100">
@@ -529,29 +665,26 @@
                                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">Saved</p>
                             </div>
                         </div>
+                        
+                        <!-- My Uploads Section -->
+                        <h3 class="font-bold text-slate-800 text-lg mb-4">My Uploaded Resources</h3>
+                        <div class="space-y-3">
+                            ${myUploadsHtml}
+                        </div>
 
                         <!-- Menu -->
-                        <div class="space-y-3">
+                        <div class="mt-8 space-y-3">
+                            <h3 class="font-bold text-slate-800 text-lg mb-2">Support</h3>
                             <a href="${INSTAGRAM_LINK}" target="_blank" class="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-100 active:scale-95 transition hover:bg-white hover:shadow-md hover:border-pink-100 group">
                                 <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center mr-4 shadow-sm text-pink-500 group-hover:scale-110 transition">
                                     <i data-lucide="instagram" class="w-5 h-5"></i>
                                 </div>
                                 <div class="flex-1">
-                                    <h4 class="font-bold text-sm text-slate-800">Support</h4>
-                                    <p class="text-[10px] text-slate-400 font-bold">Instagram</p>
+                                    <h4 class="font-bold text-sm text-slate-800">Contact / Support</h4>
+                                    <p class="text-[10px] text-slate-400 font-bold">Follow on Instagram</p>
                                 </div>
                                 <i data-lucide="chevron-right" class="w-5 h-5 text-slate-300"></i>
                             </a>
-
-                            <div onclick="fetchUserBooks(state.user.email); showToast('Synced!')" class="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-100 active:scale-95 transition hover:bg-white hover:shadow-md hover:border-blue-100 group">
-                                <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center mr-4 shadow-sm text-blue-500 group-hover:scale-110 transition">
-                                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
-                                </div>
-                                <div class="flex-1">
-                                    <h4 class="font-bold text-sm text-slate-800">Sync Data</h4>
-                                    <p class="text-[10px] text-slate-400 font-bold">Refresh List</p>
-                                </div>
-                            </div>
 
                             <button onclick="localStorage.removeItem('studentResourceUser'); state.user=null; state.view='auth'; state.authView='login'; render()" class="w-full flex items-center bg-red-50 p-4 rounded-2xl border border-red-100 active:scale-95 transition mt-6 group">
                                 <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center mr-4 shadow-sm text-red-500 group-hover:scale-110 transition">
