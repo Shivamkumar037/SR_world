@@ -289,7 +289,7 @@
         }
 
         async function handleDelete(bookId) {
-            if(!confirm("Kya aap sach mein is file ko delete karna chahte hain?")) return;
+            if(!confirm("Are you sure you want to delete this file?")) return;
             
             try {
                 const res = await fetch(`${API_BASE_URL}/books/${bookId}?deleterIdentifier=${state.user.email}`, {
@@ -310,13 +310,36 @@
             }
         }
 
+        function copyLink(link) {
+            const el = document.createElement('textarea');
+            el.value = link;
+            el.setAttribute('readonly', '');
+            el.style.position = 'absolute';
+            el.style.left = '-9999px';
+            document.body.appendChild(el);
+            el.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast('Link copied!', 'success');
+                } else {
+                    throw new Error("Copy failed");
+                }
+            } catch (err) {
+                 showToast('Copy failed! Copy manually.', 'error');
+            } finally {
+                document.body.removeChild(el);
+            }
+        }
+
         function toggleWishlist(bookId) {
             if (state.wishlist.includes(bookId)) {
                 state.wishlist = state.wishlist.filter(id => id !== bookId);
-                showToast("Removed from Wishlist");
+                showToast("Removed from wishlist");
             } else {
                 state.wishlist.push(bookId);
-                showToast("Added to Wishlist");
+                showToast("Added to wishlist");
             }
             localStorage.setItem('sr_wishlist', JSON.stringify(state.wishlist));
             render();
@@ -325,6 +348,41 @@
         function handleSearch(query) {
             state.searchQuery = query;
             render();
+        }
+
+        // --- HELPER FOR COVER ---
+        function getBookCoverHtml(book, heightClass = 'h-32') {
+            // Logic to get a valid thumbnail URL (PDF preview fix)
+            let thumb = book.thumbnailUrl;
+            if (thumb && !thumb.match(/\.(jpeg|jpg|gif|png)$/) && thumb.includes('cloudinary')) {
+                // If it's a Cloudinary URL without image extension, force jpg
+                thumb += '.jpg';
+            }
+
+            // Fallback Color Generator
+            const colors = [
+                'bg-red-100 text-red-600', 'bg-orange-100 text-orange-600', 'bg-amber-100 text-amber-600',
+                'bg-green-100 text-green-600', 'bg-emerald-100 text-emerald-600', 'bg-teal-100 text-teal-600',
+                'bg-cyan-100 text-cyan-600', 'bg-blue-100 text-blue-600', 'bg-indigo-100 text-indigo-600',
+                'bg-violet-100 text-violet-600', 'bg-purple-100 text-purple-600', 'bg-fuchsia-100 text-fuchsia-600',
+                'bg-pink-100 text-pink-600', 'bg-rose-100 text-rose-600'
+            ];
+            
+            // Simple hash for color consistency
+            let hash = 0;
+            const str = book.bookName || 'file';
+            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            const colorClass = colors[Math.abs(hash) % colors.length];
+            const initial = str.charAt(0).toUpperCase();
+
+            // If thumbnail exists, show image. Else show colorful placeholder.
+            if (thumb) {
+                return `<img src="${thumb}" class="w-full h-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center ${colorClass}\\'><span class=\\'text-4xl font-bold opacity-50\\'>${initial}</span></div>'">`;
+            } else {
+                return `<div class="w-full h-full flex items-center justify-center ${colorClass}">
+                    <span class="text-4xl font-bold opacity-50">${initial}</span>
+                </div>`;
+            }
         }
 
         // --- RENDERERS ---
@@ -339,7 +397,7 @@
             lucide.createIcons();
         }
 
-        function renderAuth() {
+        function renderAuth() { /* (No changes) */
             const isLogin = state.authView === 'login';
             app.innerHTML = `
                 <div class="min-h-screen bg-white flex flex-col justify-center px-6 fade-in relative overflow-hidden">
@@ -357,11 +415,11 @@
                         ${!isLogin ? `
                             <div class="space-y-1">
                                 <label class="text-xs font-bold text-slate-500 uppercase ml-1">Full Name</label>
-                                <input name="name" type="text" required class="w-full bg-slate-50 border border-slate-200 px-5 py-4 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition font-medium">
+                                <input name="name" type="text" required class="w-full bg-slate-50 border border-slate-200 px-5 py-4 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition font-medium" placeholder="Your Name">
                             </div>
                             <div class="space-y-1">
                                 <label class="text-xs font-bold text-slate-500 uppercase ml-1">Mobile</label>
-                                <input name="mobile" type="tel" required class="w-full bg-slate-50 border border-slate-200 px-5 py-4 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition font-medium">
+                                <input name="mobile" type="tel" required class="w-full bg-slate-50 border border-slate-200 px-5 py-4 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition font-medium" placeholder="Mobile Number">
                             </div>
                         ` : ''}
                         <div class="space-y-1">
@@ -388,7 +446,7 @@
             `;
         }
 
-        function renderMainLayout() {
+        function renderMainLayout() { /* (No changes) */
             let contentHtml = '';
             const isHome = state.activeTab === 'home';
 
@@ -411,12 +469,11 @@
                                 </div>
                             </div>
                             <div onclick="state.activeTab='profile'; render()" class="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200 cursor-pointer border-2 border-white">
-                                <!-- FIX: Syntax Error in Conditional Rendering -->
                                 ${state.user ? state.user.name.charAt(0).toUpperCase() : '<i data-lucide="user" class="w-5 h-5"></i>'}
                             </div>
                         </div>
                         
-                        <!-- Search Bar (Fixed for Responsiveness) -->
+                        <!-- Search Bar -->
                         <div class="relative group">
                             <i data-lucide="search" class="absolute left-4 top-3.5 text-gray-400 w-5 h-5 group-focus-within:text-blue-500 transition-colors"></i>
                             <input 
@@ -449,7 +506,7 @@
             `;
         }
 
-        function renderNavItem(id, icon, label) {
+        function renderNavItem(id, icon, label) { /* (No changes) */
             const isActive = state.activeTab === id;
             return `
                 <button onclick="state.activeTab='${id}'; render()" class="flex flex-col items-center w-16 transition-all duration-300 ${isActive ? '-translate-y-1' : ''}">
@@ -461,7 +518,7 @@
             `;
         }
 
-        function renderHomeContent() {
+        function renderHomeContent() { /* (No changes) */
             let displayBooks = state.recentBooks.filter(book => 
                 (state.selectedCategory === 'All' || book.bookName.toLowerCase().includes(state.selectedCategory.toLowerCase()) || book.description.toLowerCase().includes(state.selectedCategory.toLowerCase())) &&
                 (book.bookName.toLowerCase().includes(state.searchQuery.toLowerCase()) || (book.uploadedByUserName && book.uploadedByUserName.toLowerCase().includes(state.searchQuery.toLowerCase())))
@@ -521,10 +578,7 @@
             return `
                 <div onclick="state.selectedBook=${JSON.stringify(book).replace(/"/g, '&quot;')}; state.view='details'; render()" class="bg-white rounded-2xl p-2.5 shadow-sm border border-slate-100 relative group active:scale-95 transition-all duration-300 hover:shadow-md hover:border-amber-200">
                     <div class="bg-slate-50 rounded-xl h-32 w-full flex items-center justify-center mb-3 overflow-hidden relative border border-slate-100 group-hover:border-amber-100 transition-colors">
-                        ${book.thumbnailUrl ? 
-                            `<img src="${book.thumbnailUrl}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/150x200?text=PDF'">` : 
-                            `<i data-lucide="file-text" class="text-slate-300 w-12 h-12 group-hover:text-amber-400 transition-colors"></i>`
-                        }
+                        ${getBookCoverHtml(book)}
                         <div class="absolute top-2 left-2 bg-white/90 backdrop-blur text-blue-700 text-[9px] font-bold px-2 py-1 rounded-md shadow-sm border border-blue-50">PDF</div>
                         
                         <button onclick="event.stopPropagation(); toggleWishlist(${book.id})" class="absolute top-2 right-2 w-7 h-7 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-sm border border-slate-100 active:scale-90 transition">
@@ -548,7 +602,7 @@
             `;
         }
 
-        function renderUploadContent() {
+        function renderUploadContent() { /* (No changes) */
             return `
                 <div class="px-5 py-6 fade-in h-full bg-[#F0F9FF] relative">
                     <h2 class="text-2xl font-extrabold text-slate-800 mb-6">Upload <span class="text-green-600">Resource</span></h2>
@@ -563,7 +617,7 @@
                         </div>
                     </div>
 
-                    <form id="uploadForm" onsubmit="handleUpload(event)" class="space-y-6 pb-24">
+                    <form id="uploadForm" onsubmit="handleUpload(event)" class="space-y-6 pb-32">
                         <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-5">
                             <div>
                                 <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">File Name</label>
@@ -580,15 +634,15 @@
                                         <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-3 group-hover:scale-110 transition">
                                             <i data-lucide="cloud-upload" class="w-6 h-6 text-green-500"></i>
                                         </div>
-                                        <p class="text-xs text-slate-500 font-bold group-hover:text-green-600 transition">Tap to upload PDF</p>
+                                        <p class="text-xs text-slate-500 font-bold group-hover:text-green-600 transition"><span class="text-blue-600">Click to upload</span> or drag and drop</p>
                                     </div>
                                     <input name="file" type="file" required class="hidden" />
                                 </label>
                             </div>
                         </div>
 
-                        <!-- Sticky Submit Button (FIXED) -->
-                        <div class="fixed bottom-0 left-0 w-full px-5 pb-safe z-40 bg-white pt-3 shadow-[0_-5px_15px_rgba(0,0,0,0.08)]">
+                        <!-- Sticky Submit Button (FIXED POSITION) -->
+                        <div class="fixed bottom-0 left-0 w-full px-5 pb-safe z-40 bg-white pt-3 shadow-[0_-5px_15px_rgba(0,0,0,0.08)] rounded-t-2xl">
                             <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-green-200 hover:shadow-2xl hover:-translate-y-1 active:scale-95 transition-all flex justify-center items-center text-lg border-2 border-white/20 mb-3">
                                 ${state.loading ? '<div class="loader-white"></div>' : 'Publish Resource'}
                             </button>
@@ -627,7 +681,7 @@
                 state.userBooks.map(book => `
                     <div class="flex items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-3 active:scale-[0.98] transition">
                         <div class="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center mr-3 flex-shrink-0">
-                            <i data-lucide="file-text" class="w-5 h-5 text-blue-500"></i>
+                            ${getBookCoverHtml(book, 'w-10 h-10').replace('w-full h-full', 'w-full h-full rounded-lg')}
                         </div>
                         <div class="flex-1 min-w-0">
                             <h4 class="font-bold text-sm text-slate-800 truncate">${book.bookName}</h4>
@@ -706,10 +760,7 @@
                 <div class="min-h-screen bg-white flex flex-col fade-in relative">
                     <!-- Top Image BG -->
                     <div class="h-64 w-full bg-slate-50 relative flex items-center justify-center overflow-hidden">
-                        ${book.thumbnailUrl ? 
-                            `<img src="${book.thumbnailUrl}" class="w-full h-full object-cover opacity-90">` : 
-                            `<i data-lucide="file-text" class="w-24 h-24 text-slate-200"></i>`
-                        }
+                        ${getBookCoverHtml(book)}
                         <div class="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent"></div>
                         
                         <!-- Header Actions -->
@@ -754,12 +805,17 @@
                         </div>
                     </div>
 
-                    <!-- Footer Action -->
+                    <!-- Footer Action (Download & Share) -->
                     <div class="fixed bottom-0 w-full bg-white p-5 border-t border-slate-100 pb-safe shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.05)] rounded-t-3xl z-20">
-                        <button onclick="window.open('${book.downloadUrl}', '_blank')" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center active:scale-95 transition-all hover:shadow-xl hover:-translate-y-1 border-2 border-white/20 text-lg">
-                            <i data-lucide="download" class="w-5 h-5 mr-3"></i>
-                            Download PDF
-                        </button>
+                        <div class="flex space-x-3">
+                            <button onclick="copyLink('${book.downloadUrl}')" class="w-16 bg-slate-100 text-slate-600 font-bold py-4 rounded-2xl flex items-center justify-center active:scale-95 transition-all hover:bg-slate-200 border border-slate-200" title="Copy Link">
+                                <i data-lucide="link" class="w-5 h-5"></i>
+                            </button>
+                            <button onclick="window.open('${book.downloadUrl}', '_blank')" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center active:scale-95 transition-all hover:shadow-xl hover:-translate-y-1 text-lg">
+                                <i data-lucide="download" class="w-5 h-5 mr-3"></i>
+                                Download PDF
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
