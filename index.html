@@ -79,6 +79,23 @@
             </form>
         </div>
     </div>
+    
+    <!-- Custom Delete Confirmation Modal (NEW) -->
+    <div id="confirmModal" class="fixed inset-0 bg-black bg-opacity-50 z-[80] hidden items-center justify-center p-4 fade-in">
+        <div class="bg-white w-full max-w-xs p-6 rounded-2xl shadow-2xl border border-slate-100 text-center">
+            <input type="hidden" id="confirmBookId">
+            <i data-lucide="alert-triangle" class="w-12 h-12 text-red-500 mx-auto mb-4"></i>
+            <h3 class="text-xl font-bold text-slate-800 mb-2">Confirm Deletion</h3>
+            <p class="text-sm text-slate-500 mb-6">Are you sure you want to permanently delete this resource?</p>
+            
+            <div class="flex justify-between space-x-3">
+                <button type="button" onclick="closeConfirmModal()" class="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl active:scale-95 transition">Cancel</button>
+                <button type="button" onclick="executeDelete()" id="confirmDeleteBtn" class="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl active:scale-95 transition flex items-center justify-center">
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
 
 
     <script>
@@ -96,6 +113,7 @@
             userBooks: [],
             wishlist: JSON.parse(localStorage.getItem('sr_wishlist') || '[]'),
             selectedBook: null,
+            selectedBookPreview: null, // Store JSON result from /books/view/{id}
             searchQuery: '',
             selectedCategory: 'All',
             loading: false
@@ -114,6 +132,8 @@
         const app = document.getElementById('app');
         const toastContainer = document.getElementById('toast-container');
         const editModal = document.getElementById('editModal');
+        const confirmModal = document.getElementById('confirmModal');
+
 
         // --- INIT ---
         function init() {
@@ -155,6 +175,25 @@
                 console.error(err);
             } finally {
                 setLoading(false);
+            }
+        }
+        
+        async function fetchPreview(bookId) {
+            setLoading(true);
+            try {
+                const res = await fetch(`${API_BASE_URL}/books/view/${bookId}`);
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || 'Preview failed');
+                }
+                const data = await res.json();
+                state.selectedBookPreview = data;
+            } catch (err) {
+                showToast(`Preview Error: ${err.message}`, 'error');
+                state.selectedBookPreview = { error: true, message: err.message };
+            } finally {
+                setLoading(false);
+                render();
             }
         }
 
@@ -241,14 +280,25 @@
             }
         }
         
+        // --- DOWNLOAD ACTION (NEW) ---
+        function handleDownloadClick(bookId) {
+             // Redirecting the window to the download API endpoint
+             // The backend handles the secure URL generation and forced redirect (302)
+             window.open(`${API_BASE_URL}/books/download/${bookId}`, '_blank');
+             showToast('Download started (Check browser downloads)', 'success');
+        }
+
+        // --- EDIT MODAL ---
         function openEditModal(book) {
             document.getElementById('editBookId').value = book.id;
             document.getElementById('editBookName').value = book.bookName;
             document.getElementById('editDescription').value = book.description;
             editModal.classList.remove('hidden');
+            editModal.classList.add('flex');
         }
 
         function closeEditModal() {
+            editModal.classList.remove('flex');
             editModal.classList.add('hidden');
         }
 
@@ -287,10 +337,26 @@
                 btn.disabled = false;
             }
         }
+        
+        // --- DELETE MODAL ---
+        function confirmDelete(bookId) {
+            document.getElementById('confirmBookId').value = bookId;
+            confirmModal.classList.remove('hidden');
+            confirmModal.classList.add('flex');
+        }
+        
+        function closeConfirmModal() {
+            confirmModal.classList.remove('flex');
+            confirmModal.classList.add('hidden');
+        }
 
-        async function handleDelete(bookId) {
-            if(!confirm("Are you sure you want to delete this file?")) return;
-            
+        async function executeDelete() {
+            const bookId = document.getElementById('confirmBookId').value;
+            const btn = document.getElementById('confirmDeleteBtn');
+            const originalText = btn.textContent;
+            btn.innerHTML = '<div class="loader-white mr-2"></div> Deleting...';
+            btn.disabled = true;
+
             try {
                 const res = await fetch(`${API_BASE_URL}/books/${bookId}?deleterIdentifier=${state.user.email}`, {
                     method: 'DELETE'
@@ -300,6 +366,7 @@
                     throw new Error(errorData.error || 'Delete failed');
                 }
 
+                closeConfirmModal();
                 showToast("File Deleted");
                 fetchUserBooks(state.user.email);
                 fetchRecentBooks();
@@ -307,8 +374,13 @@
 
             } catch (err) {
                 showToast(err.message, 'error');
+            } finally {
+                 btn.innerHTML = originalText;
+                 btn.disabled = false;
             }
         }
+        // --- END DELETE MODAL ---
+
 
         function copyLink(link) {
             const el = document.createElement('textarea');
@@ -352,11 +424,9 @@
 
         // --- HELPER FOR COVER ---
         function getBookCoverHtml(book, heightClass = 'h-32') {
+            // This function intentionally uses thumbnailUrl for display
             let thumb = book.thumbnailUrl;
-            if (thumb && !thumb.match(/\.(jpeg|jpg|gif|png)$/) && thumb.includes('cloudinary')) {
-                thumb += '.jpg';
-            }
-
+            
             const colors = [
                 'bg-red-100 text-red-600', 'bg-orange-100 text-orange-600', 'bg-amber-100 text-amber-600',
                 'bg-green-100 text-green-600', 'bg-emerald-100 text-emerald-600', 'bg-teal-100 text-teal-600',
@@ -372,6 +442,7 @@
             const initial = str.charAt(0).toUpperCase();
 
             if (thumb) {
+                // book.thumbnailUrl contains the first page image link (JPG)
                 return `<img src="${thumb}" class="w-full h-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center ${colorClass}\\'><span class=\\'text-4xl font-bold opacity-50\\'>${initial}</span></div>'">`;
             } else {
                 return `<div class="w-full h-full flex items-center justify-center ${colorClass}">
@@ -380,19 +451,32 @@
             }
         }
 
+        // --- DYNAMIC FILE TYPE HELPER ---
+        function getFileIcon(book) {
+            // Since backend is restricted to documents, we assume 'documents' folder
+            const folder = book.folder ? book.folder.split('/').pop() : 'documents';
+            return { icon: 'file-text', tag: 'DOC/PDF', color: 'bg-blue-100 text-blue-700 border-blue-200', folder: folder };
+        }
+
+
         // --- RENDERERS ---
         function render() {
             if (state.view === 'auth') {
                 renderAuth();
             } else if (state.view === 'details') {
+                // On entering details view, fetch preview data only if not already loaded
+                if (!state.selectedBookPreview || state.selectedBookPreview.bookId !== state.selectedBook.id) {
+                     fetchPreview(state.selectedBook.id);
+                }
                 renderDetails();
             } else {
+                state.selectedBookPreview = null; // Clear preview data when leaving details view
                 renderMainLayout();
             }
             lucide.createIcons();
         }
 
-        function renderAuth() { /* (No changes) */
+        function renderAuth() {
             const isLogin = state.authView === 'login';
             app.innerHTML = `
                 <div class="min-h-screen bg-white flex flex-col justify-center px-6 fade-in relative overflow-hidden">
@@ -491,7 +575,7 @@
                     <div class="fixed bottom-0 w-full bg-white border-t border-gray-100 flex justify-around py-3 pb-safe z-30 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] rounded-t-3xl">
                         ${renderNavItem('home', 'home', 'Home')}
                         ${renderNavItem('wishlist', 'heart', 'Wishlist')}
-                        <!-- FIXED: Adjusted negative top margin for alignment -->
+                        <!-- FIX: Upload Button is w-16 h-16 (standard size) but centered -->
                         <div class="relative -top-6">
                             <button onclick="state.activeTab='upload'; render()" class="w-16 h-16 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full shadow-xl shadow-green-200 flex items-center justify-center border-4 border-[#F0F9FF] transform transition active:scale-95">
                                 <i data-lucide="plus" class="text-white w-8 h-8"></i>
@@ -572,11 +656,14 @@
 
         function getBookCard(book) {
             const isWishlisted = state.wishlist.includes(book.id);
+            const fileInfo = getFileIcon(book);
             return `
                 <div onclick="state.selectedBook=${JSON.stringify(book).replace(/"/g, '&quot;')}; state.view='details'; render()" class="bg-white rounded-2xl p-2.5 shadow-sm border border-slate-100 relative group active:scale-95 transition-all duration-300 hover:shadow-md hover:border-amber-200">
                     <div class="bg-slate-50 rounded-xl h-32 w-full flex items-center justify-center mb-3 overflow-hidden relative border border-slate-100 group-hover:border-amber-100 transition-colors">
                         ${getBookCoverHtml(book)}
-                        <div class="absolute top-2 left-2 bg-white/90 backdrop-blur text-blue-700 text-[9px] font-bold px-2 py-1 rounded-md shadow-sm border border-blue-50">PDF</div>
+                        <div class="absolute top-2 left-2 ${fileInfo.color} text-[9px] font-bold px-2 py-1 rounded-md shadow-sm border ${fileInfo.color.replace('bg-', 'border-').replace('text-', '')} flex items-center gap-1">
+                             <i data-lucide="${fileInfo.icon}" class="w-3 h-3"></i> ${fileInfo.tag}
+                        </div>
                         
                         <button onclick="event.stopPropagation(); toggleWishlist(${book.id})" class="absolute top-2 right-2 w-7 h-7 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-sm border border-slate-100 active:scale-90 transition">
                             <i data-lucide="heart" class="w-3.5 h-3.5 ${isWishlisted ? 'fill-red-500 text-red-500' : 'text-slate-400'}"></i>
@@ -617,7 +704,8 @@
                         </div>
                         <div>
                             <h4 class="text-sm font-bold text-amber-800 mb-1">Upload Guidelines</h4>
-                            <p class="text-xs text-amber-700 leading-relaxed font-medium">1. No illegal content.<br>2. No personal data.<br>3. Check copyright.</p>
+                            <p class="text-xs text-amber-700 leading-relaxed font-medium">1. Only PDF and MS Word files are accepted.</p>
+                            <p class="text-xs text-amber-700 leading-relaxed font-medium">2. No illegal content or personal data.</p>
                         </div>
                     </div>
 
@@ -632,7 +720,7 @@
                                 <textarea name="description" required rows="3" placeholder="Add details..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 outline-none focus:border-green-500 focus:bg-white focus:ring-4 focus:ring-green-50 transition font-medium text-slate-700 resize-none"></textarea>
                             </div>
                             <div>
-                                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Attachment</label>
+                                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Attachment (PDF or DOCX)</label>
                                 <label class="flex flex-col items-center justify-center w-full h-36 border-2 border-slate-200 border-dashed rounded-2xl cursor-pointer bg-slate-50 hover:bg-slate-100 hover:border-green-400 transition group">
                                     <div class="flex flex-col items-center justify-center pt-5 pb-6">
                                         <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-3 group-hover:scale-110 transition">
@@ -640,7 +728,7 @@
                                         </div>
                                         <p class="text-xs text-slate-500 font-bold group-hover:text-green-600 transition"><span class="text-blue-600">Click to upload</span> or drag and drop</p>
                                     </div>
-                                    <input name="file" type="file" required class="hidden" />
+                                    <input name="file" type="file" required class="hidden" accept=".pdf,.doc,.docx" />
                                 </label>
                             </div>
                         </div>
@@ -683,7 +771,7 @@
             const myUploadsHtml = state.userBooks.length === 0 ? 
                 `<div class="text-center py-6 text-slate-400 border border-dashed border-slate-200 rounded-xl bg-white">No files uploaded yet.</div>` :
                 state.userBooks.map(book => `
-                    <div class="flex items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-3 active:scale-[0.98] transition">
+                    <div onclick="state.selectedBook=${JSON.stringify(book).replace(/"/g, '&quot;')}; state.view='details'; render()" class="flex items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-3 active:scale-[0.98] transition">
                         <div class="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center mr-3 flex-shrink-0">
                             ${getBookCoverHtml(book, 'w-10 h-10').replace('w-full h-full', 'w-full h-full rounded-lg')}
                         </div>
@@ -692,8 +780,8 @@
                             <p class="text-[10px] text-slate-400">Uploaded: ${new Date(book.uploadDate).toLocaleDateString()}</p>
                         </div>
                         <div class="flex space-x-2 flex-shrink-0">
-                            <button onclick="openEditModal(${JSON.stringify(book).replace(/"/g, '&quot;')})" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition" title="Edit"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
-                            <button onclick="handleDelete(${book.id})" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition" title="Delete"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            <button onclick="event.stopPropagation(); openEditModal(${JSON.stringify(book).replace(/"/g, '&quot;')})" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition" title="Edit"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                            <button onclick="event.stopPropagation(); confirmDelete(${book.id})" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition" title="Delete"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                         </div>
                     </div>
                 `).join('');
@@ -760,6 +848,48 @@
 
         function renderDetails() {
             const book = state.selectedBook;
+            const previewData = state.selectedBookPreview;
+            const fileInfo = getFileIcon(book);
+            
+            // Check loading state or error state for preview
+            let previewContent = '';
+            
+            if (state.loading) {
+                previewContent = `<div class="text-center py-10"><div class="loader-white border-blue-600 border-t-transparent mx-auto"></div><p class="text-sm mt-3 text-slate-500">Fetching preview pages...</p></div>`;
+            } else if (previewData && previewData.error) {
+                 previewContent = `<div class="text-center py-8 bg-red-50/50 rounded-xl border border-red-200 text-red-700 font-medium">Error loading preview: ${previewData.message}</div>`;
+            } else if (previewData && previewData.previewPages && previewData.previewPages.length > 0) {
+                previewContent = `
+                    <div class="mt-6 border-t pt-4 border-slate-100">
+                        <h3 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                           <i data-lucide="image" class="w-4 h-4 text-green-600"></i> Document Preview (${previewData.previewPages.length} Pages)
+                        </h3>
+                        <div class="space-y-4">
+                            ${previewData.previewPages.map((pageUrl, index) => `
+                                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                    <p class="text-[10px] font-bold text-slate-500 uppercase px-3 py-1 bg-slate-50 border-b border-slate-100">Page ${index + 1}</p>
+                                    <img src="${pageUrl}" alt="Preview Page ${index + 1}" class="w-full object-cover">
+                                </div>
+                            `).join('')}
+                        </div>
+                        <a href="${previewData.fullViewUrl}" target="_blank" class="block text-center mt-4 text-xs font-bold text-blue-600 hover:underline">Open Full Document in Browser</a>
+                    </div>
+                `;
+            } else if (previewData) {
+                previewContent = `<div class="text-center py-8 bg-slate-50 rounded-xl border border-slate-200 text-slate-500 font-medium">No preview pages available (Might be DOCX or internal error).</div>`;
+            }
+
+            // Determine action label based on file type
+            let actionLabel = `Download ${fileInfo.tag}`;
+            let actionIcon = 'download';
+            
+            // For documents, we show an eye icon for viewing/download
+            if (fileInfo.folder === 'documents') {
+                actionLabel = `View/Download ${fileInfo.tag}`;
+                actionIcon = 'eye';
+            }
+
+
             app.innerHTML = `
                 <div class="min-h-screen bg-white flex flex-col fade-in relative">
                     <!-- Top Image BG -->
@@ -780,7 +910,10 @@
 
                     <div class="flex-1 px-6 -mt-10 relative z-10 pb-24">
                         <div class="bg-white rounded-3xl shadow-xl shadow-slate-200/50 p-6 border border-slate-50">
-                            <span class="bg-blue-100 text-blue-700 text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider mb-3 inline-block border border-blue-200">Education</span>
+                            <!-- Dynamic Tag -->
+                            <div class="${fileInfo.color} text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider mb-3 inline-block border ${fileInfo.color.replace('bg-', 'border-').replace('text-', '')}">
+                                ${fileInfo.tag}
+                            </div>
                             <h1 class="text-2xl font-bold text-slate-900 leading-tight mb-4">${book.bookName}</h1>
                             
                             <div class="flex items-center justify-between border-t border-b border-slate-100 py-4 mb-4">
@@ -807,17 +940,28 @@
                             <h3 class="text-sm font-bold text-slate-900 mb-2">Description</h3>
                             <p class="text-sm text-slate-500 leading-relaxed font-medium">${book.description}</p>
                         </div>
+
+                        <!-- DYNAMIC PREVIEW CONTENT (Page 1-5 Images) -->
+                        ${previewContent}
+
+                        <!-- DEBUGGING INFO (Optional) -->
+                        <div class="mt-4 p-4 bg-slate-100/50 rounded-xl text-xs text-slate-600 border border-slate-200">
+                            <p class="font-bold mb-1 text-red-600">DEBUG INFO (For troubleshooting only):</p>
+                            <p class="truncate">Download API Link: <span class="text-xs text-blue-800 break-all">${API_BASE_URL}/books/download/${book.id}</span></p>
+                            <p class="truncate">Preview API Link: <span class="text-xs text-blue-800 break-all">${API_BASE_URL}/books/view/${book.id}</span></p>
+                        </div>
                     </div>
 
-                    <!-- Footer Action (Download & Share) -->
+                    <!-- Footer Action (Download Button) -->
                     <div class="fixed bottom-0 w-full bg-white p-5 border-t border-slate-100 pb-safe shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.05)] rounded-t-3xl z-20">
                         <div class="flex space-x-3">
-                            <button onclick="copyLink('${book.downloadUrl}')" class="w-16 bg-slate-100 text-slate-600 font-bold py-4 rounded-2xl flex items-center justify-center active:scale-95 transition-all hover:bg-slate-200 border border-slate-200" title="Copy Link">
+                            <button onclick="copyLink('${API_BASE_URL}/books/download/${book.id}')" class="w-16 bg-slate-100 text-slate-600 font-bold py-4 rounded-2xl flex items-center justify-center active:scale-95 transition-all hover:bg-slate-200 border border-slate-200" title="Copy Download Link">
                                 <i data-lucide="link" class="w-5 h-5"></i>
                             </button>
-                            <button onclick="window.open('${book.downloadUrl}', '_blank')" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center active:scale-95 transition-all hover:shadow-xl hover:-translate-y-1 text-lg">
-                                <i data-lucide="download" class="w-5 h-5 mr-3"></i>
-                                Download PDF
+                            <!-- FIX: Button calls local JS function which hits the Download API and redirects -->
+                            <button onclick="handleDownloadClick(${book.id})" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center active:scale-95 transition-all hover:shadow-xl hover:-translate-y-1 text-lg">
+                                <i data-lucide="${actionIcon}" class="w-5 h-5 mr-3"></i>
+                                ${actionLabel}
                             </button>
                         </div>
                     </div>
@@ -840,11 +984,9 @@
 
         // --- HELPER FOR COVER ---
         function getBookCoverHtml(book, heightClass = 'h-32') {
+            // This function intentionally uses thumbnailUrl for display
             let thumb = book.thumbnailUrl;
-            if (thumb && !thumb.match(/\.(jpeg|jpg|gif|png)$/) && thumb.includes('cloudinary')) {
-                thumb += '.jpg';
-            }
-
+            
             const colors = [
                 'bg-red-100 text-red-600', 'bg-orange-100 text-orange-600', 'bg-amber-100 text-amber-600',
                 'bg-green-100 text-green-600', 'bg-emerald-100 text-emerald-600', 'bg-teal-100 text-teal-600',
@@ -860,12 +1002,20 @@
             const initial = str.charAt(0).toUpperCase();
 
             if (thumb) {
+                // book.thumbnailUrl contains the first page image link (JPG)
                 return `<img src="${thumb}" class="w-full h-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center ${colorClass}\\'><span class=\\'text-4xl font-bold opacity-50\\'>${initial}</span></div>'">`;
             } else {
                 return `<div class="w-full h-full flex items-center justify-center ${colorClass}">
                     <span class="text-4xl font-bold opacity-50">${initial}</span>
                 </div>`;
             }
+        }
+
+        // --- DYNAMIC FILE TYPE HELPER ---
+        function getFileIcon(book) {
+            // Since backend is restricted to documents, we assume 'documents' folder
+            const folder = book.folder ? book.folder.split('/').pop() : 'documents';
+            return { icon: 'file-text', tag: 'DOC/PDF', color: 'bg-blue-100 text-blue-700 border-blue-200', folder: folder };
         }
 
         init();
